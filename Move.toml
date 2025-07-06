@@ -1,0 +1,18 @@
+[package]
+name = "lottos"
+version = "1.0.0"
+authors = []
+
+[addresses]
+lottos = "0xcafe"
+admin = "0xcafe"
+treasury = "0xcafe"
+
+[dev-addresses]
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "mainnet"
+subdir = "aptos-framework"
+
+[dev-dependencies]

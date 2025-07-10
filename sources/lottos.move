@@ -23,12 +23,6 @@
 /// - **Jackpot2**: 10% of ticket sales + rollover (Power 6/55 only)
 /// - **Fixed Tiers**: Predetermined multipliers of ticket price
 module lottos::lottos {
-    use std::bcs;
-    use std::signer;
-    use std::string::{Self, String};
-    use aptos_std::simple_map::{Self, SimpleMap};
-    use aptos_std::smart_table::{Self, SmartTable};
-    use aptos_std::string_utils;
     use aptos_framework::dispatchable_fungible_asset;
     use aptos_framework::event;
     use aptos_framework::fungible_asset::Metadata;
@@ -36,6 +30,12 @@ module lottos::lottos {
     use aptos_framework::primary_fungible_store;
     use aptos_framework::randomness;
     use aptos_framework::timestamp;
+    use aptos_std::simple_map::{Self, SimpleMap};
+    use aptos_std::smart_table::{Self, SmartTable};
+    use aptos_std::string_utils;
+    use std::bcs;
+    use std::signer;
+    use std::string::{Self, String};
 
     use lottos::config;
     use lottos::utils;
@@ -204,8 +204,8 @@ module lottos::lottos {
 
     // ==================== EVENTS ====================
     
-    /// Emitted when admin creates a new lottery draw
     #[event]
+    /// Emitted when admin creates a new lottery draw
     struct CreateDrawEvent has drop, store {
         /// ID of the newly created draw
         draw_id: u64,
@@ -215,8 +215,8 @@ module lottos::lottos {
         close_timestamp_secs: u64,
     }
 
-    /// Emitted when user purchases a lottery ticket
     #[event]
+    /// Emitted when user purchases a lottery ticket
     struct BuyTicketEvent has drop, store {
         /// Which draw the ticket is for
         draw_id: u64,
@@ -226,8 +226,8 @@ module lottos::lottos {
         ticket: vector<u64>,
     }
 
-    /// Emitted when user successfully claims a prize
     #[event]
+    /// Emitted when user successfully claims a prize
     struct ClaimPrizeEvent has drop, store {
         /// Draw ID where prize was won
         draw_id: u64,
@@ -241,8 +241,8 @@ module lottos::lottos {
         prize_amount: u64,
     }
 
-    /// Emitted when draw is executed and winning numbers determined
     #[event]
+    /// Emitted when draw is executed and winning numbers determined
     struct DrawResultEvent has drop, store {
         /// Draw that was executed
         draw_id: u64,
@@ -327,6 +327,7 @@ module lottos::lottos {
 
     // ==================== VIEW FUNCTIONS ====================
     
+    #[view]
     /// Retrieve complete information about a specific lottery draw
     ///
     /// # Parameters
@@ -346,7 +347,6 @@ module lottos::lottos {
     ///
     /// # Aborts
     /// * If draw_id doesn't exist
-    #[view]
     public fun get_draw(draw_id: u64): (u64, String, DrawStatus, u64, u64, u64, vector<u64>, u64, u64) acquires Lottos {
         let lottos = &Lottos[@lottos];
         let draw = lottos.draws.borrow(draw_id);
@@ -363,6 +363,7 @@ module lottos::lottos {
         )
     }
 
+    #[view]
     /// Retrieve information about a specific lottery ticket
     ///
     /// # Parameters
@@ -379,7 +380,6 @@ module lottos::lottos {
     ///
     /// # Aborts
     /// * If ticket doesn't exist for this user/draw/numbers combination
-    #[view]
     public fun get_ticket(
         user: address,
         draw_id: u64,
@@ -399,6 +399,7 @@ module lottos::lottos {
         )
     }
 
+    #[view]
     /// Get the next draw ID that will be assigned
     /// Useful for frontend to know what draw ID to expect next
     ///
@@ -407,7 +408,6 @@ module lottos::lottos {
     ///
     /// # Aborts
     /// * Never
-    #[view]
     public fun get_next_draw_id(): u64 acquires Lottos {
         let lottos = &Lottos[@lottos];
         lottos.next_draw_id
@@ -664,6 +664,7 @@ module lottos::lottos {
         });
     }
 
+    #[randomness]
     /// Execute a lottery draw by generating random winning numbers
     ///
     /// This function uses Aptos native randomness to generate winning numbers.
@@ -699,8 +700,7 @@ module lottos::lottos {
     /// * `EUNAUTHORIZED` - If signer is not an authorized admin
     /// * `ENOT_OPEN_DRAW` - If draw is not in Open status
     /// * `ENOT_CLOSE_DRAW_TIME` - If closing time hasn't been reached
-    #[randomness]
-    entry fun draws(admin: &signer, draw_id: u64) acquires Lottos {
+    entry fun execute_draw(admin: &signer, draw_id: u64) acquires Lottos {
         config::assert_admin(admin);
 
         let lottos = &mut Lottos[@lottos];
@@ -715,10 +715,13 @@ module lottos::lottos {
             let from_draw_id = draw.id - 1;
             loop {
                 let from_draw = lottos.draws.borrow(from_draw_id);
-                if (from_draw.type == draw.type || from_draw_id == 0) {
+                if (from_draw.type == draw.type) {
                     break;
                 };
                 from_draw_id -= 1;
+                if (from_draw_id == 0) {
+                    break;
+                };
             };
             if (from_draw_id != 0) {
                 let from_draw = lottos.draws.borrow(from_draw_id);
@@ -1004,5 +1007,89 @@ module lottos::lottos {
         });
 
         numbers_win_jackpot2_string
+    }
+
+    // ==================== TEST HELPER FUNCTIONS ====================
+
+    #[test_only]
+    /// Initialize module for testing with same configuration as production
+    /// 
+    /// # Parameters
+    /// * `lottos_signer` - Test environment signer
+    public fun init_module_for_test(lottos_signer: &signer) {
+        init_module(lottos_signer);
+    }
+
+    #[test_only]
+    #[lint::allow_unsafe_randomness]
+    public fun test_execute_draw(admin: &signer, draw_id: u64) acquires Lottos {
+        execute_draw(admin, draw_id);
+    }
+
+    #[test_only]
+    /// Helper function to check if a draw status equals Open
+    public fun is_draw_status_open(status: DrawStatus): bool {
+        status == DrawStatus::Open
+    }
+
+    #[test_only]
+    /// Helper function to check if a draw status equals Completed
+    public fun is_draw_status_completed(status: DrawStatus): bool {
+        status == DrawStatus::Completed
+    }
+
+    #[test_only]
+    /// Helper function to check if a claim status equals Unclaimed
+    public fun is_claim_status_unclaimed(status: ClaimStatus): bool {
+        status == ClaimStatus::Unclaimed
+    }
+
+    #[test_only]
+    /// Helper function to check if a claim status equals Claimed
+    public fun is_claim_status_claimed(status: ClaimStatus): bool {
+        status == ClaimStatus::Claimed
+    }
+
+    #[test_only]
+    /// Helper function to add a ticket for a user without checking if the draw is open
+    public fun add_ticket_for_user_unchecked(user: &signer, draw_id: u64, ticket: vector<u64>) acquires Lottos {
+        let lottos = &mut Lottos[@lottos];
+        let draw = lottos.draws.borrow_mut(draw_id);
+
+        let user_addr = signer::address_of(user);
+        let game_config = lottos.config.borrow(draw.type);
+
+        game_config.assert_valid_ticket(ticket);
+        let sorted_ticket = string_utils::to_string(&utils::sort(ticket));
+
+        // if the ticket is already sold, add the user to the list
+        if (draw.tickets_sold.contains(sorted_ticket)) {
+            let users = draw.tickets_sold.borrow_mut(sorted_ticket);
+            assert!(!users.contains(&user_addr), ETICKET_ALREADY_BOUGHT);
+            users.push_back(user_addr);
+        } else {
+            draw.tickets_sold.add(sorted_ticket, vector[user_addr]);
+        };
+
+        let ticket_constructor_ref = &object::create_named_object(
+            user,
+            ticket_seed(user_addr, draw.id, sorted_ticket)
+        );
+        let ticket_signer = &object::generate_signer(ticket_constructor_ref);
+        move_to(
+            ticket_signer,
+            Ticket {
+                draw_id: draw.id,
+                chosen_numbers: ticket,
+                owner: user_addr,
+                claim_status: ClaimStatus::Unclaimed
+            }
+        );
+
+        event::emit(BuyTicketEvent {
+            draw_id: draw.id,
+            user: user_addr,
+            ticket
+        });
     }
 }

@@ -15,10 +15,9 @@
 /// - Currently supports USDt (Tether) on testnet
 /// - Can be extended to support multiple stablecoins
 module lottos::config {
-    use std::signer;
     use aptos_framework::fungible_asset::Metadata;
-    use aptos_framework::object;
-    use aptos_framework::object::Object;
+    use aptos_framework::object::{Self, Object};
+    use std::signer;
 
     /// Module identifier for domain separation
     const CONFIG_MODULE_NAME: vector<u8> = b"lottos::config";
@@ -39,8 +38,9 @@ module lottos::config {
     /// Invalid payment: Fungible asset is not in the whitelist
     const ENOT_ACCEPTED_FA: u64 = 2;
 
-    /// Global configuration stored at module address
-    /// Contains admin settings and whitelisted payment assets
+    // ==================== STRUCTS ====================
+    
+    // Global configuration stored at module address
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct GlobalConfig has key {
         /// List of fungible assets accepted for ticket payments
@@ -134,11 +134,11 @@ module lottos::config {
         assert!(config.stable_fa_accepted.contains(&fa), ENOT_ACCEPTED_FA);
     }
 
+    #[test_only]
     /// Initialize module for testing with same configuration as production
     /// 
     /// # Parameters
     /// * `lottos_signer` - Test environment signer
-    #[test_only]
     public fun init_module_for_test(lottos_signer: &signer, stable_fa_accepted: vector<Object<Metadata>>) {
         move_to(
             lottos_signer,

@@ -23,6 +23,12 @@
 /// - **Jackpot2**: 10% of ticket sales + rollover (Power 6/55 only)
 /// - **Fixed Tiers**: Predetermined multipliers of ticket price
 module lottos::lottos {
+    use std::bcs;
+    use std::signer;
+    use std::string::{Self, String};
+    use aptos_std::simple_map::{Self, SimpleMap};
+    use aptos_std::smart_table::{Self, SmartTable};
+    use aptos_std::string_utils;
     use aptos_framework::dispatchable_fungible_asset;
     use aptos_framework::event;
     use aptos_framework::fungible_asset::Metadata;
@@ -30,24 +36,18 @@ module lottos::lottos {
     use aptos_framework::primary_fungible_store;
     use aptos_framework::randomness;
     use aptos_framework::timestamp;
-    use aptos_std::simple_map::{Self, SimpleMap};
-    use aptos_std::smart_table::{Self, SmartTable};
-    use aptos_std::string_utils;
-    use std::bcs;
-    use std::signer;
-    use std::string::{Self, String};
 
     use lottos::config;
     use lottos::utils;
 
     // ==================== GAME TYPE CONSTANTS ====================
-    
+
     /// Lotto 5/35 game identifier: Pick 5 numbers from 1-35 plus extra number
     const LOTTO_535: vector<u8> = b"Lotto 5/35";
-    
+
     /// Mega 6/45 game identifier: Pick 6 numbers from 1-45 (no extra number)
     const MEGA_645: vector<u8> = b"Mega 6/45";
-    
+
     /// Power 6/55 game identifier: Pick 6 numbers from 1-55 plus extra number
     const POWER_655: vector<u8> = b"Power 6/55";
 
@@ -55,13 +55,13 @@ module lottos::lottos {
     const LOTTOS_DOMAIN_SEPARATOR: vector<u8> = b"lottos::lottos";
 
     // ==================== PRICING CONSTANTS ====================
-    
+
     /// Fixed price per lottery ticket: $0.50 USD (in microunits: 500,000 = $0.50)
     /// All game types use the same ticket price for consistency
     const TICKET_PRICE: u64 = 500000;
 
     // ==================== ERROR CODES ====================
-    
+
     // Ticket validation errors (1-3)
     /// Ticket validation failed: Invalid number count, out-of-range numbers, or duplicates
     const EINVALID_TICKET_NUMBER: u64 = 1;
@@ -69,29 +69,31 @@ module lottos::lottos {
     const ETICKET_NOT_FOUND: u64 = 2;
     /// Duplicate ticket purchase: User already owns this number combination for this draw
     const ETICKET_ALREADY_BOUGHT: u64 = 3;
-    
-    // Draw state errors (4-7) 
+    /// Invalid special number: Not in range [1, 12] for Lotto 5/35
+    const EINVALID_SPECIAL_NUMBER: u64 = 4;
+
+    // Draw state errors (5-8)
     /// Draw state error: Attempted operation on non-open draw
-    const ENOT_OPEN_DRAW: u64 = 4;
+    const ENOT_OPEN_DRAW: u64 = 5;
     /// Draw closed: Cannot purchase tickets after closing timestamp
-    const ECLOSED_DRAW: u64 = 5;
+    const ECLOSED_DRAW: u64 = 6;
     /// Premature draw execution: Closing time has not been reached yet
-    const ENOT_CLOSE_DRAW_TIME: u64 = 6;
+    const ENOT_CLOSE_DRAW_TIME: u64 = 7;
     /// Prize claim failed: Draw must be completed before claiming prizes
-    const ENOT_COMPLETED_DRAW: u64 = 7;
-    
-    // Prize claiming errors (8-9)
+    const ENOT_COMPLETED_DRAW: u64 = 8;
+
+    // Prize claiming errors (9-10
     /// No prize available: Ticket did not match winning combination
-    const ENOT_WINNER: u64 = 8;
+    const ENOT_WINNER: u64 = 9;
     /// Prize already claimed: This ticket has been redeemed
-    const EALREADY_CLAIMED: u64 = 9;
-    
-    // System errors (10)
+    const EALREADY_CLAIMED: u64 = 10;
+
+    // System errors (11)
     /// Rollover logic error: First draw cannot inherit previous jackpots
-    const EFIRST_DRAW_ROLLOVER: u64 = 10;
+    const EFIRST_DRAW_ROLLOVER: u64 = 11;
 
     // ==================== ENUMS ====================
-    
+
     /// Current state of a lottery draw
     enum DrawStatus has copy, drop, store {
         /// Draw is accepting ticket purchases
@@ -132,7 +134,8 @@ module lottos::lottos {
     }
 
     // ==================== CORE STRUCTS ====================
-    
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     /// Main lottery contract state stored at module address
     /// Contains all active draws and game configurations
     struct Lottos has key {
@@ -157,8 +160,6 @@ module lottos::lottos {
         ticket_price: u64,
         /// Prize amounts for each tier as multiples of ticket price
         prize_values: SimpleMap<PrizeTier, u64>,
-        /// Whether this game includes an extra number draw
-        has_extra_number: bool
     }
 
     /// Individual lottery draw instance
@@ -196,6 +197,8 @@ module lottos::lottos {
         draw_id: u64,
         /// Player's chosen numbers (unsorted as picked)
         chosen_numbers: vector<u64>,
+        /// Special number for 5/35 (1-12), 0 if not used
+        special_number: u64,
         /// Address that owns this ticket
         owner: address,
         /// Whether prize has been claimed
@@ -203,7 +206,7 @@ module lottos::lottos {
     }
 
     // ==================== EVENTS ====================
-    
+
     #[event]
     /// Emitted when admin creates a new lottery draw
     struct CreateDrawEvent has drop, store {
@@ -253,7 +256,7 @@ module lottos::lottos {
     }
 
     // ==================== MODULE INITIALIZATION ====================
-    
+
     /// Initialize the lottery module with game configurations and prize structures
     /// Called automatically when the module is published
     ///
@@ -283,7 +286,6 @@ module lottos::lottos {
             picks_count: 5,
             ticket_price: TICKET_PRICE,
             prize_values: lotto_prize_values,
-            has_extra_number: true
         });
 
         let mega_prize_values = simple_map::new();
@@ -297,7 +299,6 @@ module lottos::lottos {
             picks_count: 6,
             ticket_price: TICKET_PRICE,
             prize_values: mega_prize_values,
-            has_extra_number: false
         });
 
         let power_prize_values = simple_map::new();
@@ -312,7 +313,6 @@ module lottos::lottos {
             picks_count: 6,
             ticket_price: TICKET_PRICE,
             prize_values: power_prize_values,
-            has_extra_number: true
         });
 
         move_to(
@@ -326,7 +326,7 @@ module lottos::lottos {
     }
 
     // ==================== VIEW FUNCTIONS ====================
-    
+
     #[view]
     /// Retrieve complete information about a specific lottery draw
     ///
@@ -384,16 +384,26 @@ module lottos::lottos {
         user: address,
         draw_id: u64,
         ticket_numbers: vector<u64>
-    ): (u64, vector<u64>, address, ClaimStatus) acquires Ticket {
-        let sorted_ticket = string_utils::to_string(&utils::sort(ticket_numbers));
+    ): (u64, vector<u64>, address, ClaimStatus) acquires Ticket, Lottos {
+        let lottos = &Lottos[@lottos];
+        let draw = lottos.draws.borrow(draw_id);
+        let game_config = lottos.config.borrow(draw.type);
+        let (formated_ticked, sorted_ticket, special_number) = format_ticket(game_config, draw.type, ticket_numbers);
+
         let ticket_addr = object::create_object_address(
             &user,
             ticket_seed(user, draw_id, sorted_ticket)
         );
         let ticket = &Ticket[ticket_addr];
+        let chosen_numbers = ticket.chosen_numbers;
+        if (special_number != 0) {
+            // Add special number back to the end for display purposes for Lotto 5/35
+            chosen_numbers.push_back(special_number);
+        };
+
         (
             ticket.draw_id,
-            ticket.chosen_numbers,
+            chosen_numbers,
             ticket.owner,
             ticket.claim_status
         )
@@ -414,7 +424,7 @@ module lottos::lottos {
     }
 
     // ==================== ENTRY FUNCTIONS ====================
-    
+
     /// Purchase one or more lottery tickets for a specific draw
     ///
     /// Each ticket is represented as an NFT object owned by the user.
@@ -462,10 +472,11 @@ module lottos::lottos {
             tickets.length() * game_config.ticket_price
         );
 
+        let draw_type = draw.type;
         draw.num_ticket_sold += tickets.length();
         tickets.for_each(|ticket| {
-            game_config.assert_valid_ticket(ticket);
-            let sorted_ticket = string_utils::to_string(&utils::sort(ticket));
+            let (formated_ticked, sorted_ticket, special_number) = format_ticket(game_config, draw.type, ticket);
+
 
             // if the ticket is already sold, add the user to the list
             if (draw.tickets_sold.contains(sorted_ticket)) {
@@ -485,7 +496,8 @@ module lottos::lottos {
                 ticket_signer,
                 Ticket {
                     draw_id: draw.id,
-                    chosen_numbers: ticket,
+                    chosen_numbers: formated_ticked,
+                    special_number,
                     owner: user_addr,
                     claim_status: ClaimStatus::Unclaimed
                 }
@@ -552,7 +564,11 @@ module lottos::lottos {
         assert!(prize_tier != PrizeTier::NoWin, ENOT_WINNER);
 
         // Verify ticket ownership and claim status
-        let sorted_ticket = string_utils::to_string(&utils::sort(ticket_numbers));
+        let (formated_ticket, sorted_ticket, special_number) = format_ticket(
+            lottos.config.borrow(draw.type),
+            draw.type,
+            ticket_numbers
+        );
         let ticket_addr = object::create_object_address(
             &user_addr,
             ticket_seed(user_addr, draw_id, sorted_ticket)
@@ -691,7 +707,7 @@ module lottos::lottos {
     /// - Extra number is unique from main numbers
     /// - Numbers are in range [1, total_numbers] for the game type
     ///
-    /// # Rollover Logic
+    /// # Rollover Logic (BE calculated off-chain)
     /// - If previous draw had no jackpot winner: adds 50% of ticket sales
     /// - If previous draw had no jackpot2 winner: adds 10% of ticket sales
     /// - Only applies to draws of the same game type
@@ -700,36 +716,15 @@ module lottos::lottos {
     /// * `EUNAUTHORIZED` - If signer is not an authorized admin
     /// * `ENOT_OPEN_DRAW` - If draw is not in Open status
     /// * `ENOT_CLOSE_DRAW_TIME` - If closing time hasn't been reached
-    entry fun execute_draw(admin: &signer, draw_id: u64) acquires Lottos {
+    entry fun execute_draw(admin: &signer, draw_id: u64, total_rollover_amount: u64) acquires Lottos {
         config::assert_admin(admin);
 
         let lottos = &mut Lottos[@lottos];
-        let draw = lottos.draws.borrow(draw_id);
+        let draw = lottos.draws.borrow_mut(draw_id);
+
         assert!(draw.status == DrawStatus::Open, ENOT_OPEN_DRAW);
         assert!(draw.close_timestamp_secs < timestamp::now_seconds(), ENOT_CLOSE_DRAW_TIME);
         let game_config = lottos.config.borrow(draw.type);
-
-        let cumulative_jackpot_pool = 0;
-        let cumulative_jackpot2_pool = 0;
-        if (draw.id > 1) {
-            let from_draw_id = draw.id - 1;
-            loop {
-                let from_draw = lottos.draws.borrow(from_draw_id);
-                if (from_draw.type == draw.type) {
-                    break;
-                };
-                from_draw_id -= 1;
-                if (from_draw_id == 0) {
-                    break;
-                };
-            };
-            if (from_draw_id != 0) {
-                let from_draw = lottos.draws.borrow(from_draw_id);
-                (cumulative_jackpot_pool, cumulative_jackpot2_pool) = rollover_jackpot(draw, from_draw, game_config);
-            };
-        };
-
-        let draw = lottos.draws.borrow_mut(draw_id);
 
         let winning_numbers = vector[];
         let extra_number = 0;
@@ -741,18 +736,26 @@ module lottos::lottos {
             winning_numbers.push_back(number);
         };
 
-        if (game_config.has_extra_number) {
+        if (draw.type == string::utf8(POWER_655)) {
             extra_number = randomness::u64_range(1, game_config.total_numbers + 1);
             while (winning_numbers.contains(&extra_number)) {
                 extra_number = randomness::u64_range(1, game_config.total_numbers + 1);
             };
         };
 
+        if (draw.type == string::utf8(LOTTO_535)) {
+            extra_number = randomness::u64_range(1, 13);
+        };
+
         draw.status = DrawStatus::Completed;
         draw.winning_numbers = winning_numbers;
         draw.extra_number = extra_number;
-        draw.cumulative_jackpot_pool = cumulative_jackpot_pool;
-        draw.cumulative_jackpot2_pool = cumulative_jackpot2_pool;
+        draw.cumulative_jackpot_pool = total_rollover_amount / 2;
+        draw.cumulative_jackpot2_pool = if (draw.type == string::utf8(POWER_655)) {
+            total_rollover_amount / 10
+        } else {
+            0
+        };
 
         event::emit(DrawResultEvent {
             draw_id,
@@ -762,7 +765,7 @@ module lottos::lottos {
     }
 
     // ==================== HELPER FUNCTIONS ====================
-    
+
     /// Validate a lottery ticket according to game rules
     ///
     /// Ensures ticket has correct number count, all numbers are in valid range,
@@ -791,6 +794,10 @@ module lottos::lottos {
             assert!(!checked.contains(&number), EINVALID_TICKET_NUMBER);
             checked.push_back(number);
         });
+    }
+
+    fun assert_valid_special_number(special_number: u64) {
+        assert!(special_number > 0 && special_number <= 12, EINVALID_SPECIAL_NUMBER);
     }
 
     /// Generate unique seed for ticket object address creation
@@ -855,21 +862,32 @@ module lottos::lottos {
     /// - Second: 4 matches
     /// - Third: 3 matches
     fun compare_draw_result(self: &Draw, ticket: vector<u64>): PrizeTier {
-        let sorted_ticket = utils::sort(ticket);
-        let sorted_winning = utils::sort(self.winning_numbers);
+        let special_number = 0;
+        if (self.type == string::utf8(LOTTO_535)) {
+            special_number = ticket.pop_back();
+        };
 
         // Count matching numbers
         let matches = 0;
         let i = 0;
-        while (i < sorted_ticket.length()) {
-            if (sorted_winning.contains(&sorted_ticket[i])) {
+        while (i < ticket.length()) {
+            if (self.winning_numbers.contains(&ticket[i])) {
                 matches += 1;
             };
             i += 1;
         };
 
         // Check extra number match for Power 6/55
-        let extra_match = (ticket.contains(&self.extra_number) && self.extra_number != 0);
+        let extra_match = false;
+        if (self.type == string::utf8(POWER_655)) {
+            extra_match = (self.extra_number == special_number);
+        };
+
+        // check special number match for Lotto 5/35
+        if (self.type == string::utf8(LOTTO_535)) {
+            extra_match = (self.extra_number == special_number);
+        };
+
 
         // Determine prize tier based on game type and matches
         if (self.type == string::utf8(LOTTO_535)) {
@@ -898,76 +916,6 @@ module lottos::lottos {
             else if (matches == 3) PrizeTier::Third
             else PrizeTier::NoWin
         }
-    }
-
-    /// Calculate jackpot rollover amounts from previous draw
-    ///
-    /// When a draw has no winners for jackpot tiers, a portion of ticket sales
-    /// rolls over to the next draw of the same game type. This creates
-    /// accumulating jackpots that grow until someone wins.
-    ///
-    /// # Parameters
-    /// * `to_draw` - Current draw that will receive rollover funds
-    /// * `from_draw` - Previous draw to check for winners and calculate rollover
-    /// * `game_config` - Game configuration for ticket price and rules
-    ///
-    /// # Returns
-    /// * `(u64, u64)` - Tuple of (main_jackpot_rollover, jackpot2_rollover)
-    ///
-    /// # Rollover Rules
-    /// - **Main Jackpot**: If no winner, add 50% of previous draw's ticket sales
-    /// - **Jackpot2** (Power 6/55 only): If no winner, add 10% of ticket sales
-    /// - Only applies to same game type (Lotto to Lotto, etc.)
-    /// - Previous draw must be completed
-    ///
-    /// # Winner Detection
-    /// - Main jackpot: Someone bought exact winning number combination
-    /// - Jackpot2: Someone bought 5-of-6 + extra number combination
-    ///
-    /// # Aborts
-    /// * `ENOT_COMPLETED_DRAW` - If from_draw is not completed
-    fun rollover_jackpot(
-        to_draw: &Draw,
-        from_draw: &Draw,
-        game_config: &GameConfig
-    ): (u64, u64) {
-        // Verify from_draw is completed
-        assert!(from_draw.status == DrawStatus::Completed, ENOT_COMPLETED_DRAW);
-        let from_draw_result = from_draw.winning_numbers;
-        let has_jackpot_winner = from_draw.tickets_sold.contains(
-            string_utils::to_string(&utils::sort(from_draw_result))
-        );
-
-        let has_jackpot2_winner = false;
-        if (to_draw.type == string::utf8(POWER_655)) {
-            let numbers_win_jackpot2 = list_ticket_win_jackpot2(
-                from_draw_result,
-                from_draw.extra_number
-            );
-            numbers_win_jackpot2.for_each(|number| {
-                if (from_draw.tickets_sold.contains(number)) {
-                    has_jackpot2_winner = true;
-                };
-            });
-        };
-
-        let num_ticket_sold = from_draw.num_ticket_sold;
-        let ticket_price = game_config.ticket_price;
-
-        let cumulative_jackpot_pool = 0;
-        let cumulative_jackpot2_pool = 0;
-        if (!has_jackpot_winner) {
-            cumulative_jackpot_pool = from_draw.cumulative_jackpot_pool + (num_ticket_sold * ticket_price) / 2;
-        };
-
-        if (!has_jackpot2_winner) {
-            cumulative_jackpot2_pool = from_draw.cumulative_jackpot2_pool + (num_ticket_sold * ticket_price) / 10;
-        };
-
-        (
-            cumulative_jackpot_pool,
-            cumulative_jackpot2_pool
-        )
     }
 
     /// Generate all possible Jackpot2 winning combinations for Power 6/55
@@ -1009,6 +957,28 @@ module lottos::lottos {
         numbers_win_jackpot2_string
     }
 
+    /// Format ticket numbers for storage and comparison
+    fun format_ticket(
+        game_config: &GameConfig,
+        draw_type: String,
+        ticket: vector<u64>
+    ): (vector<u64>, String, u64) {
+        let special_number = 0;
+        let is_lotto_535 = (draw_type == string::utf8(LOTTO_535));
+        if (is_lotto_535) {
+            // Lotto 5/35 has an extra number, and it's the last number in the ticket
+            special_number = ticket.pop_back();
+            assert_valid_special_number(special_number);
+        };
+        game_config.assert_valid_ticket(ticket);
+        let sorted_ticket = string_utils::to_string(&utils::sort(ticket));
+        if (is_lotto_535) {
+            sorted_ticket.append(string_utils::to_string(&special_number));
+        };
+
+        (ticket, sorted_ticket, special_number)
+    }
+
     // ==================== TEST HELPER FUNCTIONS ====================
 
     #[test_only]
@@ -1022,8 +992,8 @@ module lottos::lottos {
 
     #[test_only]
     #[lint::allow_unsafe_randomness]
-    public fun test_execute_draw(admin: &signer, draw_id: u64) acquires Lottos {
-        execute_draw(admin, draw_id);
+    public fun test_execute_draw(admin: &signer, draw_id: u64, total_reward_amount: u64) acquires Lottos {
+        execute_draw(admin, draw_id, total_reward_amount);
     }
 
     #[test_only]
@@ -1059,8 +1029,8 @@ module lottos::lottos {
         let user_addr = signer::address_of(user);
         let game_config = lottos.config.borrow(draw.type);
 
-        game_config.assert_valid_ticket(ticket);
-        let sorted_ticket = string_utils::to_string(&utils::sort(ticket));
+        let draw_type = draw.type;
+        let (formated_ticket, sorted_ticket, special_number) = format_ticket(game_config, draw_type, ticket);
 
         // if the ticket is already sold, add the user to the list
         if (draw.tickets_sold.contains(sorted_ticket)) {
@@ -1080,7 +1050,8 @@ module lottos::lottos {
             ticket_signer,
             Ticket {
                 draw_id: draw.id,
-                chosen_numbers: ticket,
+                chosen_numbers: formated_ticket,
+                special_number,
                 owner: user_addr,
                 claim_status: ClaimStatus::Unclaimed
             }

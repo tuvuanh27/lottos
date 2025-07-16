@@ -420,7 +420,7 @@ module lottos::test_lottos {
         // Fast forward past close time
         timestamp::fast_forward_seconds(200);
 
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Verify draw is completed
         let (_, _, status, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
@@ -444,7 +444,7 @@ module lottos::test_lottos {
 
         timestamp::fast_forward_seconds(200);
 
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, status, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
         assert!(lottos::is_draw_status_completed(status), 0);
@@ -465,7 +465,7 @@ module lottos::test_lottos {
 
         timestamp::fast_forward_seconds(200);
 
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, status, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
         assert!(lottos::is_draw_status_completed(status), 0);
@@ -487,7 +487,7 @@ module lottos::test_lottos {
 
         timestamp::fast_forward_seconds(200);
 
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
 
@@ -517,7 +517,7 @@ module lottos::test_lottos {
         timestamp::fast_forward_seconds(200);
 
         let user_signer = &aptos_framework::account::create_signer_for_test(USER1);
-        lottos::test_execute_draw(user_signer, 1, 0);
+        lottos::test_execute_draw(user_signer, 1, 0, 0);
     }
 
     #[test]
@@ -531,10 +531,10 @@ module lottos::test_lottos {
         timestamp::fast_forward_seconds(200);
 
         // Execute once - should succeed
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Execute again - should fail
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
     }
 
     #[test]
@@ -546,7 +546,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(LOTTO_535), close_time);
 
         // Don't fast forward - should fail
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
     }
 
     // ==================== PRIZE CALCULATION TESTS ====================
@@ -565,7 +565,7 @@ module lottos::test_lottos {
         lottos::buy_tickets(user_signer, 1, tickets, get_usdt());
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
     }
 
     #[test]
@@ -582,7 +582,7 @@ module lottos::test_lottos {
         lottos::buy_tickets(user_signer, 1, tickets, get_usdt());
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
     }
 
     // ==================== PRIZE CLAIMING TESTS ====================
@@ -600,7 +600,7 @@ module lottos::test_lottos {
         test_helpers::mint_tokens(treasury_signer, get_usdt(), 1_000_000 * TICKET_PRICE); // Treasury funds
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Get the actual winning numbers to test a known scenario
         let (_, _, _, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
@@ -657,7 +657,7 @@ module lottos::test_lottos {
         test_helpers::mint_tokens(treasury_signer, get_usdt(), 1000 * TICKET_PRICE);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Try to claim without owning a ticket
         lottos::claim_prize(user_signer, treasury_signer, 1, vector[1, 2, 3, 4, 5], get_usdt());
@@ -681,14 +681,14 @@ module lottos::test_lottos {
         lottos::buy_tickets(user_signer, 1, tickets, get_usdt());
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Create second draw of same type
         let close_time2 = timestamp::now_seconds() + 100;
         lottos::create_draw(admin_signer(), string::utf8(LOTTO_535), close_time2);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 2, TICKET_PRICE);
+        lottos::test_execute_draw(admin_signer(), 2, TICKET_PRICE, 0);
 
         // Check that second draw has rollover (might be 0 if first draw had winner)
         let (_, _, _, _, jackpot_pool, _, _, _, _) = lottos::get_draw(2);
@@ -704,14 +704,14 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(LOTTO_535), close_time1);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         // Create Mega 6/45 draw - should not inherit rollover from different game type
         let close_time2 = timestamp::now_seconds() + 100;
         lottos::create_draw(admin_signer(), string::utf8(MEGA_645), close_time2);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 2, 0);
+        lottos::test_execute_draw(admin_signer(), 2, 0, 0);
 
         // Mega draw should not have rollover from Lotto draw
         let (_, _, _, _, jackpot_pool, _, _, _, _) = lottos::get_draw(2);
@@ -870,7 +870,7 @@ module lottos::test_lottos {
 
         // Execute draw first to get winning numbers
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
 
@@ -925,7 +925,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(MEGA_645), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, _, _) = lottos::get_draw(1);
 
@@ -978,7 +978,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(POWER_655), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, extra_number, _) = lottos::get_draw(1);
 
@@ -1008,7 +1008,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(MEGA_645), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, _, _) = lottos::get_draw(1);
 
@@ -1048,7 +1048,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(MEGA_645), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, _, _) = lottos::get_draw(1);
 
@@ -1076,7 +1076,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(LOTTO_535), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let user1 = &aptos_framework::account::create_signer_for_test(USER1);
         let treasury_signer = &aptos_framework::account::create_signer_for_test(TREASURY);
@@ -1121,7 +1121,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(MEGA_645), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, _, _, _, _, winning_numbers, _, _) = lottos::get_draw(1);
 
@@ -1196,7 +1196,7 @@ module lottos::test_lottos {
 
         // Phase 2: Execute draw
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let (_, _, status, _, cumulative_jackpot, cumulative_jackpot2, winning_numbers, extra_number, tickets_sold) = lottos::get_draw(
             1
@@ -1247,7 +1247,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(POWER_655), close_time2);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 2, 0);
+        lottos::test_execute_draw(admin_signer(), 2, 0, 0);
 
         // Since we had winners, rollover should be minimal
         let (_, _, _, _, _jackpot_pool2, _jackpot2_pool2, _, _, _) = lottos::get_draw(2);
@@ -1263,7 +1263,7 @@ module lottos::test_lottos {
         lottos::create_draw(admin_signer(), string::utf8(LOTTO_535), close_time);
 
         timestamp::fast_forward_seconds(200);
-        lottos::test_execute_draw(admin_signer(), 1, 0);
+        lottos::test_execute_draw(admin_signer(), 1, 0, 0);
 
         let user1 = &aptos_framework::account::create_signer_for_test(USER1);
 

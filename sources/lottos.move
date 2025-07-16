@@ -472,6 +472,7 @@ module lottos::lottos {
             tickets.length() * game_config.ticket_price
         );
 
+
         let draw_type = draw.type;
         draw.num_ticket_sold += tickets.length();
         tickets.for_each(|ticket| {
@@ -716,7 +717,7 @@ module lottos::lottos {
     /// * `EUNAUTHORIZED` - If signer is not an authorized admin
     /// * `ENOT_OPEN_DRAW` - If draw is not in Open status
     /// * `ENOT_CLOSE_DRAW_TIME` - If closing time hasn't been reached
-    entry fun execute_draw(admin: &signer, draw_id: u64, total_rollover_amount: u64) acquires Lottos {
+    entry fun execute_draw(admin: &signer, draw_id: u64, total_rollover_jackpot: u64, total_rollover_jackpot2: u64) acquires Lottos {
         config::assert_admin(admin);
 
         let lottos = &mut Lottos[@lottos];
@@ -750,9 +751,9 @@ module lottos::lottos {
         draw.status = DrawStatus::Completed;
         draw.winning_numbers = winning_numbers;
         draw.extra_number = extra_number;
-        draw.cumulative_jackpot_pool = total_rollover_amount / 2;
+        draw.cumulative_jackpot_pool = total_rollover_jackpot;
         draw.cumulative_jackpot2_pool = if (draw.type == string::utf8(POWER_655)) {
-            total_rollover_amount / 10
+            total_rollover_jackpot2
         } else {
             0
         };
@@ -782,12 +783,13 @@ module lottos::lottos {
     ///
     /// # Aborts
     /// * `EINVALID_TICKET_NUMBER` - If any validation rule fails
-    fun assert_valid_ticket(self: &GameConfig, ticket: vector<u64>) {
+    fun assert_valid_ticket(self: &GameConfig, ticket: &vector<u64>) {
         // Check correct number of picks
         assert!(ticket.length() == self.picks_count, EINVALID_TICKET_NUMBER);
 
         let checked = vector[];
-        ticket.for_each(|number| {
+        ticket.for_each_ref(|num| {
+            let number = *num;
             // check if number is in range (1-based numbering)
             assert!(number > 0 && number <= self.total_numbers, EINVALID_TICKET_NUMBER);
             // check if number is unique
@@ -970,7 +972,7 @@ module lottos::lottos {
             special_number = ticket.pop_back();
             assert_valid_special_number(special_number);
         };
-        game_config.assert_valid_ticket(ticket);
+        game_config.assert_valid_ticket(&ticket);
         let sorted_ticket = string_utils::to_string(&utils::sort(ticket));
         if (is_lotto_535) {
             sorted_ticket.append(string_utils::to_string(&special_number));
@@ -992,8 +994,8 @@ module lottos::lottos {
 
     #[test_only]
     #[lint::allow_unsafe_randomness]
-    public fun test_execute_draw(admin: &signer, draw_id: u64, total_reward_amount: u64) acquires Lottos {
-        execute_draw(admin, draw_id, total_reward_amount);
+    public fun test_execute_draw(admin: &signer, draw_id: u64, total_rollover_jackpot: u64, total_rollover_jackpot2: u64) acquires Lottos {
+        execute_draw(admin, draw_id, total_rollover_jackpot, total_rollover_jackpot2);
     }
 
     #[test_only]
